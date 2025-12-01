@@ -5,28 +5,34 @@ import uuid
 import subprocess
 from datetime import datetime, timedelta
 import ctypes
-
 from cryptography import x509
 from cryptography.x509.oid import NameOID, ExtendedKeyUsageOID
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives.serialization import pkcs12
-
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QPushButton, QLabel, QVBoxLayout, QHBoxLayout,
     QTextEdit, QFileDialog, QProgressBar, QMessageBox, QLineEdit, QGroupBox, QInputDialog, QTabWidget
 )
+from PyQt6.QtGui import QIcon
 from PyQt6.QtCore import  QThread, pyqtSignal
+# import ends here
 
+
+
+
+# ----------------------------- Metadata ----------------------------------------------
 APP_TITLE = "Neo Signer"
-VERSION = "1.0.1"
+VERSION = "1.0.0"
 COMPANY = "Dexcorp Softwares Limited"
+
+
+# ---------------------------- Directories / Dependencies -----------------------------
 BIN_DIR = os.path.join(os.path.dirname(__file__), "bin")
 
 
 # ---------------------------- Privilege / Install Helpers ----------------------------
 def is_admin() -> bool:
-    """Return True if running with administrative privileges on Windows."""
     try:
         return bool(ctypes.windll.shell32.IsUserAnAdmin())
     except Exception:
@@ -34,16 +40,7 @@ def is_admin() -> bool:
 
 
 def elevate_and_run_install(pfx_path: str, password: str) -> None:
-    """Relaunch the current Python interpreter with elevation to perform a PFX install.
-
-    This uses ShellExecuteW with the 'runas' verb which triggers a UAC prompt.
-    The elevated process is started with the `--elev-install` flag and expects
-    the PFX path and password as the next two arguments.
-    """
-    script = os.path.abspath(__file__)
-    # Quote arguments so paths with spaces are preserved
     params = f'--elev-install "{pfx_path}" "{password}"'
-    # Use ShellExecuteW to trigger UAC elevation
     try:
         ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, params, None, 1)
     except Exception:
@@ -51,10 +48,6 @@ def elevate_and_run_install(pfx_path: str, password: str) -> None:
 
 
 def install_pfx_direct(pfx_path: str, password: str) -> dict:
-    """Directly install a PFX into the TrustedPublisher store using certutil.
-
-    Returns dict with {"ok": bool, ...}
-    """
     if not os.path.isfile(pfx_path):
         return {"ok": False, "error": "PFX file not found."}
 
@@ -84,7 +77,6 @@ class RealWorker(QThread):
         self.action = action
         self.payload = payload
         self.log = log_fn
-
     def run(self):
         try:
             self.progress.emit(5)
@@ -92,7 +84,7 @@ class RealWorker(QThread):
                 res = self._generate_certificate(
                     self.payload.get("publisher", ""),
                     self.payload.get("password", ""),
-                    self.payload.get("organization", COMPANY)
+                    self.payload.get("organization", "")
                 )
             elif self.action == "install_cert":
                 res = self._install_certificate(self.payload["pfx_path"], self.payload.get("password", ""))
@@ -112,7 +104,8 @@ class RealWorker(QThread):
         self.finished.emit(res)
 
     def _generate_certificate(self, publisher_name: str, pfx_password: str, organization_name: str) -> dict:
-        out_dir = os.path.join(os.path.expanduser("~"), "neo_certs")
+        # Save generated certificates next to this module if no EXE path is available
+        out_dir = os.path.join(os.path.dirname(__file__), "neo_signed")
         os.makedirs(out_dir, exist_ok=True)
 
         key = rsa.generate_private_key(public_exponent=65537, key_size=3072)
@@ -207,13 +200,20 @@ class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle(f"{APP_TITLE} — {VERSION}")
+        # set window icon if available
+        icon_path = os.path.join(os.path.dirname(__file__), "assets", "logo.ico")
+        if os.path.isfile(icon_path):
+            try:
+                self.setWindowIcon(QIcon(icon_path))
+            except Exception:
+                pass
         self.setMinimumSize(820, 520)
         self._exe_path = None
         self._pfx_path = None
         self._pfx_password = ""
         self.workers = []
-        self._last_exe_dir = os.path.expanduser("~")
-        self._last_pfx_dir = os.path.expanduser("~")
+        self._last_exe_dir = os.path.expanduser("")
+        self._last_pfx_dir = os.path.expanduser("")
         self.build_ui()
         # Check admin state immediately after UI is built
         try:
@@ -226,7 +226,7 @@ class MainWindow(QWidget):
         main_layout = QVBoxLayout()
         # Header with admin status
         header_h = QHBoxLayout()
-        header_label = QLabel(f"<h2>{APP_TITLE}</h2><small>Sign EXE with a self-signed PFX</small>")
+        header_label = QLabel(f"<h2>{APP_TITLE}</h2><small>Sign EXE with a self-signed Certificate</small>")
         self.admin_label = QLabel("")
         header_h.addWidget(header_label)
         header_h.addStretch()
@@ -254,7 +254,7 @@ class MainWindow(QWidget):
         layout = QVBoxLayout()
 
         # --- Select EXE
-        group_file = QGroupBox("1) Select Executable (.exe)")
+        group_file = QGroupBox("1) Select Setup Executable (.exe)")
         g = QHBoxLayout()
         self.exe_line = QLineEdit(); self.exe_line.setReadOnly(True)
         btn_browse = QPushButton("Browse..."); btn_browse.clicked.connect(self.browse_exe)
@@ -262,24 +262,24 @@ class MainWindow(QWidget):
         group_file.setLayout(g); layout.addWidget(group_file)
         
         # --- Signing Publisher (separate from Certificate Manager)
-        gp_sign_pub = QGroupBox("Signing Publisher")
+        gp_sign_pub = QGroupBox("Application Metadata")
         gs = QHBoxLayout()
         self.signing_publisher_input = QLineEdit("")
         gs.addWidget(QLabel("App Name:")); gs.addWidget(self.signing_publisher_input)
         gp_sign_pub.setLayout(gs); layout.addWidget(gp_sign_pub)
 
         # --- Select existing PFX
-        group_cert_select = QGroupBox("2) Select PFX")
+        group_cert_select = QGroupBox("2) Select Certificate")
         g_select = QHBoxLayout()
         self.select_pfx_line = QLineEdit(); self.select_pfx_line.setReadOnly(True)
-        btn_select_pfx = QPushButton("Select PFX..."); btn_select_pfx.clicked.connect(self.select_pfx)
+        btn_select_pfx = QPushButton("Select..."); btn_select_pfx.clicked.connect(self.select_pfx)
         g_select.addWidget(self.select_pfx_line); g_select.addWidget(btn_select_pfx)
         group_cert_select.setLayout(g_select); layout.addWidget(group_cert_select)
 
         # --- Sign EXE
         group_sign = QGroupBox("3) Sign Executable")
         g3 = QHBoxLayout()
-        btn_sign = QPushButton("Sign Now"); btn_sign.clicked.connect(self.sign_exe)
+        btn_sign = QPushButton("Sign"); btn_sign.clicked.connect(self.sign_exe)
         self.timestamp_input = QLineEdit(); self.timestamp_input.setPlaceholderText("Optional timestamp URL")
         self.progress = QProgressBar()
         g3.addWidget(btn_sign); g3.addWidget(self.timestamp_input); g3.addWidget(self.progress)
@@ -294,17 +294,17 @@ class MainWindow(QWidget):
         layout = QVBoxLayout()
 
         # --- Generate PFX
-        group_cert = QGroupBox("Generate Self-signed PFX")
+        group_cert = QGroupBox("Generate Certificate")
         g2 = QHBoxLayout()
-        self.organization_input = QLineEdit(COMPANY)
-        self.publisher_input = QLineEdit("Neo Publisher")
+        self.organization_input = QLineEdit("")
+        self.publisher_input = QLineEdit("")
         self.pfx_pass_input = QLineEdit(); self.pfx_pass_input.setEchoMode(QLineEdit.EchoMode.Password)
-        self.pfx_pass_input.setPlaceholderText("PFX password (optional)")
+        self.pfx_pass_input.setPlaceholderText("Password")
         self.pfx_line = QLineEdit(); self.pfx_line.setReadOnly(True)
-        btn_gen = QPushButton("Generate PFX"); btn_gen.clicked.connect(self.generate_cert)
+        btn_gen = QPushButton("Generate Certificate"); btn_gen.clicked.connect(self.generate_cert)
         g2.addWidget(QLabel("Organization:")); g2.addWidget(self.organization_input)
         g2.addWidget(QLabel("Publisher:")); g2.addWidget(self.publisher_input)
-        g2.addWidget(QLabel("PFX Password:")); g2.addWidget(self.pfx_pass_input)
+        g2.addWidget(QLabel("Password:")); g2.addWidget(self.pfx_pass_input)
         g2.addWidget(self.pfx_line); g2.addWidget(btn_gen)
         group_cert.setLayout(g2); layout.addWidget(group_cert)
 
@@ -312,12 +312,12 @@ class MainWindow(QWidget):
         group_install = QGroupBox("Install Certificate to Trusted Publishers")
         g_install = QHBoxLayout()
         self.cert_pfx_input = QLineEdit(); self.cert_pfx_input.setReadOnly(True)
-        btn_browse_cert = QPushButton("Select PFX..."); btn_browse_cert.clicked.connect(self.browse_cert_pfx)
+        btn_browse_cert = QPushButton("Select..."); btn_browse_cert.clicked.connect(self.browse_cert_pfx)
         self.cert_pwd_input = QLineEdit(); self.cert_pwd_input.setEchoMode(QLineEdit.EchoMode.Password)
-        self.cert_pwd_input.setPlaceholderText("PFX password (optional)")
+        self.cert_pwd_input.setPlaceholderText("Password")
         btn_install = QPushButton("Install"); btn_install.clicked.connect(self.install_cert_only)
         self.install_progress = QProgressBar()
-        g_install.addWidget(QLabel("PFX:")); g_install.addWidget(self.cert_pfx_input); g_install.addWidget(btn_browse_cert)
+        g_install.addWidget(QLabel("Certificate:")); g_install.addWidget(self.cert_pfx_input); g_install.addWidget(btn_browse_cert)
         g_install.addWidget(QLabel("Password:")); g_install.addWidget(self.cert_pwd_input)
         g_install.addWidget(btn_install); g_install.addWidget(self.install_progress)
         group_install.setLayout(g_install); layout.addWidget(group_install)
@@ -361,24 +361,24 @@ class MainWindow(QWidget):
         org = self.organization_input.text().strip() or COMPANY
         pub = self.publisher_input.text().strip()
         pwd = self.pfx_pass_input.text() or ""
-        self.append_log(f"Generating PFX for {pub} (Organization: {org})...")
+        self.append_log(f"Generating Certificate for {pub} (Organization: {org})...")
         w = RealWorker("generate_cert", {"publisher": pub, "password": pwd, "organization": org}, self.append_log)
         self.register_worker(w); w.finished.connect(self.on_cert_generated); w.start()
 
     def on_cert_generated(self, res):
         if not res.get("ok"):
-            self.append_log("Cert generation failed: " + res.get("error", "unknown"))
+            self.append_log("Certificate generation failed: " + res.get("error", "unknown"))
             return
         self._pfx_path = res["pfx_path"]; self._pfx_password = self.pfx_pass_input.text() or ""
         self.pfx_line.setText(self._pfx_path)
-        self.append_log(f"PFX created: {self._pfx_path}")
+        self.append_log(f"Certificate created: {self._pfx_path}")
 
     def select_pfx(self):
         start_dir = self._last_pfx_dir if os.path.isdir(self._last_pfx_dir) else ""
         path, _ = QFileDialog.getOpenFileName(self, "Select PFX", start_dir, "PFX Files (*.pfx)")
         if path:
             self._last_pfx_dir = os.path.dirname(path)
-            pwd, ok = QInputDialog.getText(self, "PFX Password", "Enter PFX password (or leave empty):", QLineEdit.EchoMode.Password)
+            pwd, ok = QInputDialog.getText(self, "Password", "Enter password (or leave empty):", QLineEdit.EchoMode.Password)
             if ok:
                 self._pfx_path = path
                 self._pfx_password = pwd
@@ -413,16 +413,16 @@ class MainWindow(QWidget):
 
     def browse_cert_pfx(self):
         start_dir = self._last_pfx_dir if os.path.isdir(self._last_pfx_dir) else ""
-        path, _ = QFileDialog.getOpenFileName(self, "Select PFX", start_dir, "PFX Files (*.pfx)")
+        path, _ = QFileDialog.getOpenFileName(self, "Select Certificate", start_dir, "PFX Files (*.pfx)")
         if path:
             self._last_pfx_dir = os.path.dirname(path)
             self.cert_pfx_input.setText(path)
-            self.append_log(f"Selected PFX: {path}")
+            self.append_log(f"Selected Certificate: {path}")
 
     def install_cert_only(self):
         pfx_path = self.cert_pfx_input.text().strip()
         if not pfx_path:
-            QMessageBox.warning(self, "Missing", "Select a PFX file first."); return
+            QMessageBox.warning(self, "Missing", "Select a certificate file first."); return
         
         password = self.cert_pwd_input.text()
         # If not running as admin, prompt to relaunch elevated
@@ -496,7 +496,7 @@ class MainWindow(QWidget):
 
 # ---------------------------- Run ----------------------------
 def main():
-    # Headless elevated install path: when relaunched with --elev-install <pfx> <password>
+    # Headless elevated install path: when relached with --elev-install <pfx> <password>
     if "--elev-install" in sys.argv:
         try:
             idx = sys.argv.index("--elev-install")
@@ -520,6 +520,13 @@ def main():
             sys.exit(0 if res.get("ok") else 1)
 
     app = QApplication(sys.argv)
+    # set application icon if available
+    icon_path = os.path.join(os.path.dirname(__file__), "assets", "logo.ico")
+    if os.path.isfile(icon_path):
+        try:
+            app.setWindowIcon(QIcon(icon_path))
+        except Exception:
+            pass
     win = MainWindow()
     win.show()
     sys.exit(app.exec())
