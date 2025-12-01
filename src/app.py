@@ -39,6 +39,22 @@ def is_admin() -> bool:
         return False
 
 
+# --- NEW PATH RESOLUTION FUNCTION ---
+def resource_path(relative_path):
+    """Get the absolute path to resource, works for dev and for PyInstaller."""
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        # This is the path to the bundled files inside the executable
+        base_path = sys._MEIPASS # type: ignore
+    except Exception:
+        # If running in development (outside of a PyInstaller bundle)
+        # Use the current directory as the base path
+        base_path = os.path.abspath(".")
+
+    return os.path.join(base_path, relative_path)
+# ------------------------------------
+
+
 def elevate_and_run_install(pfx_path: str, password: str) -> None:
     params = f'--elev-install "{pfx_path}" "{password}"'
     try:
@@ -200,13 +216,17 @@ class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle(f"{APP_TITLE} — {VERSION}")
+
+
         # set window icon if available
-        icon_path = os.path.join(os.path.dirname(__file__), "assets", "logo.ico")
+        icon_path = resource_path(os.path.join("assets", "logo.ico"))
         if os.path.isfile(icon_path):
             try:
                 self.setWindowIcon(QIcon(icon_path))
             except Exception:
                 pass
+
+
         self.setMinimumSize(820, 520)
         self._exe_path = None
         self._pfx_path = None
@@ -521,7 +541,7 @@ def main():
 
     app = QApplication(sys.argv)
     # set application icon if available
-    icon_path = os.path.join(os.path.dirname(__file__), "assets", "logo.ico")
+    icon_path = resource_path(os.path.join("assets", "logo.ico"))
     if os.path.isfile(icon_path):
         try:
             app.setWindowIcon(QIcon(icon_path))
