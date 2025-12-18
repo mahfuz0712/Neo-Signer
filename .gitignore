@@ -1,4 +1,6 @@
 .venv*/
 build/
+certificate/
 dist/
+setup/
 app.spec
