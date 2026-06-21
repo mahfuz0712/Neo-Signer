@@ -1,6 +1,6 @@
 {
     "name": "Neo Signer",
-    "description": "A secure and user-friendly wallet for managing your Neo assets and interacting with decentralized applications (dApps) on the Neo blockchain.",
+    "description": "An application signing tool to sign with business certificats for windows based apps.",
     "category": "Developer Tools",
     "ageRating": "13+",
     "author": "Mohammad Mahfuz Rahman"
